@@ -997,12 +997,13 @@ function iRC:ForceGuildSync()
     return true
 end
 
-function iRC:RequestGuildPresence(isOfficerPoll)
+function iRC:RequestGuildPresence(isOfficerPoll, isStartup)
     -- Presence probes and their small HELLO replies remain live in combat;
     -- deferring either side would make an active client appear missing.
     if not self:IsGuildConnectionActive() then return false end
     if not ((C_ChatInfo and C_ChatInfo.SendAddonMessage) or SendAddonMessage) then return false end
-    local result = send(self.Prefix, table.concat({ "PRESENCE_REQUEST", WIRE_VERSION, isOfficerPoll and "OFFICER_POLL" or "REQUEST" }, SEP), "GUILD")
+    local result = send(self.Prefix, table.concat({ "PRESENCE_REQUEST", WIRE_VERSION,
+        isOfficerPoll and "OFFICER_POLL" or "REQUEST", isStartup and "STARTUP" or "" }, SEP), "GUILD")
     if result == false or type(result) == "number" and result ~= 0 then return false end
     if isOfficerPoll then lastPresencePollAt = time() end
     self:DebugMsg(self:Text("PRESENCE_POLL_SENT"), 3)
@@ -1280,6 +1281,11 @@ local function handleMessage(prefix, message, distribution, sender)
         end
         iRC:DebugMsg(iRC:Text("PRESENCE_POLL_RECEIVED", sender), 3)
         scheduleHello(sender, 5)
+        if parts[4] == "STARTUP" and iRC.RaceLockedSync then
+            C_Timer.After(0.5 + math.random() * 5, function()
+                if iRC:IsGuildMemberName(sender) then iRC.RaceLockedSync:Broadcast(sender) end
+            end)
+        end
     elseif kind == "GROUP_VIOLATION" and parts[2] == WIRE_VERSION and iRC:IsGuildMemberName(sender) then
         local violationId, occurredAt = parts[3], tonumber(parts[4])
         local instanceName, players = cleanWireText(parts[5], 60), cleanWireText(parts[6], 100)
@@ -1827,9 +1833,17 @@ local function handleMessage(prefix, message, distribution, sender)
         local rulesSchemaSupported = supportsCurrentRuleset(parts[19])
             and raceLockFlagPresent and guildFoundFlagPresent
             and raceLockChecksumValid and guildFoundChecksumValid
+        -- A local GM edit advances rulesTimestampHex before any received
+        -- backup exists for that new timestamp. Never compare a newer stamp
+        -- against a backup that still describes the previous ruleset.
+        local sameStampReference = connection and connection.receivedRulesBackup
+        local staleBackup = sameStampReference and split(sameStampReference)[12] ~= savedHex
+        if staleBackup then
+            sameStampReference = rulesBackupFingerprint(connection.rules, savedHex, connection.rulesTimestampSource)
+        end
         local sameStampMatches = incomingTimestamp ~= savedTimestamp or not connection
             or connection.receivedRulesBackupVersion ~= 1 or not connection.receivedRulesBackup
-            or connection.receivedRulesBackup == incomingBackup
+            or sameStampReference == incomingBackup
         local authorityName, authorityRank = getRulesAuthority()
         local senderIsAuthority = senderIsGuildMaster or senderRank ~= nil and (authorityRank == nil or senderRank < authorityRank
             or (senderRank == authorityRank and (not authorityName
@@ -1881,7 +1895,31 @@ local function handleMessage(prefix, message, distribution, sender)
                 receivedGuildFoundChecksum, receivedAnnouncementChecksum }, SEP), "WHISPER", sender)
         elseif connection and senderRank ~= nil then
             if senderIsAuthority and not senderIsGuildMaster and (not checksumValid or not sameStampMatches) then
-                iRC:DebugMsg(iRC:Text("RULES_CHECKSUM_MISMATCH", sender, timestampHex), 1)
+                local localBackup = sameStampReference or rulesBackupFingerprint(
+                    connection.rules, savedHex, connection.rulesTimestampSource)
+                local reasons = { "local " .. rulesBackupChecksum(localBackup)
+                    .. " / received " .. rulesBackupChecksum(incomingBackup) }
+                if not checksumValid then
+                    reasons[#reasons + 1] = "base checksum received " .. (incomingChecksum ~= "" and incomingChecksum or "(missing)")
+                        .. ", expected " .. rulesBackupChecksum(incomingBackup)
+                end
+                if not sameStampMatches then
+                    local savedFields, incomingFields = split(sameStampReference), split(incomingBackup)
+                    local fieldNames = {
+                        "native language", "Self-Found", "level-60 Guild Found", "level-60 exception",
+                        "same-race groups", "mixed-race level 60", "guild race", "same-race minimum level",
+                        "guild-only groups", "guild-group minimum level", "reserved field", "timestamp", "creator",
+                    }
+                    for index, fieldName in ipairs(fieldNames) do
+                        if savedFields[index] ~= incomingFields[index] then
+                            reasons[#reasons + 1] = "same timestamp, " .. fieldName .. (staleBackup and " local " or " saved ")
+                                .. tostring(savedFields[index]) .. " / received " .. tostring(incomingFields[index])
+                            break
+                        end
+                    end
+                    if #reasons == 0 then reasons[#reasons + 1] = "saved rules fingerprint differs" end
+                end
+                iRC:DebugMsg(iRC:Text("RULES_CHECKSUM_MISMATCH", sender, timestampHex, table.concat(reasons, "; ")), 1)
             end
             if not senderIsAuthority then iRC:DebugMsg(iRC:Text("RULES_IGNORED_LOWER_AUTHORITY", sender), 3) end
         end
@@ -1890,23 +1928,41 @@ end
 
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("PLAYER_LOGIN")
+frame:RegisterEvent("PLAYER_ENTERING_WORLD")
 frame:RegisterEvent("PLAYER_GUILD_UPDATE")
 frame:RegisterEvent("CHAT_MSG_ADDON")
-frame:SetScript("OnEvent", function(_, event, ...)
-    if event == "PLAYER_LOGIN" then
-        registerPrefix(iRC.Prefix)
-        ignoreGuildUpdatesUntil = GetTime() + 8
-        C_Timer.After(iRC:GetStartupTrafficDelay(), function()
+local startupSyncScheduled = false
+local function scheduleStartupSync()
+    if startupSyncScheduled then return end
+    startupSyncScheduled = true
+    C_Timer.After(iRC:GetStartupTrafficDelay(), function()
+        local function sendStartupSync(attempt)
+            if not iRC:IsInGuildConnection() then
+                if attempt < 4 then C_Timer.After(3, function() sendStartupSync(attempt + 1) end) end
+                return
+            end
             iRC:SendGuildActivation()
             iRC:RequestGuildActivation()
             scheduleHello(nil, 5)
-            if iRC:HasGuildPermission("presence") then iRC:PollGuildPresence() else iRC:RequestGuildPresence() end
+            if iRC:HasGuildPermission("presence") then
+                iRC:RequestGuildPresence(true, true)
+            else
+                iRC:RequestGuildPresence(false, true)
+            end
             iRC:RequestConnectionRules()
             iRC:SendGuildManagementSettings()
             iRC:SendGuildBankExceptions()
             iRC:SendGuildFoundTradeExceptions()
             iRC:SendGuildHomepageDescription()
-        end)
+        end
+        sendStartupSync(1)
+    end)
+end
+frame:SetScript("OnEvent", function(_, event, ...)
+    if event == "PLAYER_LOGIN" then
+        registerPrefix(iRC.Prefix)
+        ignoreGuildUpdatesUntil = GetTime() + 8
+        scheduleStartupSync()
         if C_Timer and C_Timer.NewTicker then
             C_Timer.NewTicker(60, function()
                 iRC:SendGuildActivation()
@@ -1926,6 +1982,9 @@ frame:SetScript("OnEvent", function(_, event, ...)
                 iRC:PollGuildPresence()
             end)
         end
+    elseif event == "PLAYER_ENTERING_WORLD" then
+        local _, isReloading = ...
+        if isReloading then scheduleStartupSync() end
     elseif event == "PLAYER_GUILD_UPDATE" then
         local unit = ...
         if unit ~= "player" or guildUpdatePending or GetTime() < ignoreGuildUpdatesUntil then return end

@@ -555,14 +555,16 @@ function Sync:RecordDeath(name)
     return true
 end
 
-function Sync:Broadcast()
-    if iRC:DeferLowTraffic("traffic:guild-found-profile", function() Sync:Broadcast() end) then return false end
+function Sync:Broadcast(targetName)
+    if iRC:DeferLowTraffic("traffic:guild-found-profile:" .. tostring(targetName or "guild"),
+        function() Sync:Broadcast(targetName) end) then return false end
     local db = connection()
     if not db or not moneyReady then return end
     self:RefreshMoneyMonitoring()
     local now = GetTime()
-    if lastBroadcast[db.key] and now - lastBroadcast[db.key] < 5 then return end
-    lastBroadcast[db.key] = now
+    local broadcastKey = db.key .. ":" .. (targetName and iRC:NormalizeName(targetName) or "guild")
+    if lastBroadcast[broadcastKey] and now - lastBroadcast[broadcastKey] < 5 then return end
+    lastBroadcast[broadcastKey] = now
     local name = shortName(iRC:GetPlayerName())
     local verified, clean, tamperAt = self:GetLocalRawStatus()
     local history = localHistory()
@@ -580,7 +582,7 @@ function Sync:Broadcast()
                 .. "," .. tostring(entry.playedBefore or "") .. "," .. tostring(entry.playedAfter or "")
                 .. "," .. tostring(entry.playedBeforeAt or "") .. "," .. tostring(entry.playedAfterAt or "")
         end
-        send(IRC_ROSTER, msg)
+        send(IRC_ROSTER, msg, targetName)
     end
 end
 

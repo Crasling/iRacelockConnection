@@ -2,6 +2,15 @@
 iRC - Changelog
 ================================================================================
 
+v0.4.11 - Ruleset Diagnostics & Reload Sync
+--------------------------------------------------------------------------------
+[ADDED] A one-time reminder appears 10 seconds after login when RaceLockedForkEU is also loaded, advising players using iRC instead to disable it manually
+[FIX] Reload startup sync retries briefly if guild data is not ready, and deduplicates login/reload triggers before requesting presence and rules
+[FIX] Login and reload startup requests prompt current iRC clients to whisper fresh Guild Found status as well as their live profile
+[CHANGED] Ruleset rejection errors identify a base-checksum mismatch or the first saved rule that differs under the same timestamp
+[FIX] Ruleset relays are not rejected solely because a locally updated GM timestamp is newer than its last received backup
+[CHANGED] Ruleset rejection messages show local and received eight-digit hex fingerprints for comparison
+
 v0.4.10 - Guild Verification & Bank Fixes
 --------------------------------------------------------------------------------
 [FIX] Guild Bank keeps its scroll position when iRC data refreshes the panel

@@ -1263,6 +1263,15 @@ iRC.Frame:SetScript("OnEvent", function(_, event, loadedName)
         iRC.StartupTrafficReadyAt = (GetTime and GetTime() or 0) + 3
         iRC:DebugMsg(iRC:Text("DEBUG_MODE"), 3)
         iRC:PrintLoaded()
+        C_Timer.After(10, function()
+            local settings = iRC:GetSettings()
+            if settings.raceLockedForkReminderShown then return end
+            local isLoaded = C_AddOns and C_AddOns.IsAddOnLoaded or IsAddOnLoaded
+            if isLoaded and isLoaded("RaceLockedForkEU") then
+                settings.raceLockedForkReminderShown = true
+                iRC:Print(iRC:Text("RACELOCKED_FORK_DISABLE_REMINDER"))
+            end
+        end)
         if iRC.LegacyAddonWasLoaded then
             iRC:Print(iRC.Colors.Yellow .. "The old iRacelockConnection addon was disabled. Please /reload before using iRC." .. iRC.Colors.Reset)
         end
