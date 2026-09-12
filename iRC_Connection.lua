@@ -219,7 +219,6 @@ function iRC:SendHello(targetName)
     local profile = self:GetLocalProfile()
     self:StoreMemberProfile(profile)
     send(self.Prefix, addProfileParts({ "HELLO", WIRE_VERSION }, profile), targetName and "WHISPER" or "GUILD", targetName)
-    if self.Professions then self.Professions:SendSummary(false) end
     self:DebugMsg(self:Text("PROFILE_SENT"), 3)
 end
 

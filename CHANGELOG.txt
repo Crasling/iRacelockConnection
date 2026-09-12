@@ -2,6 +2,10 @@
 iRC - Changelog
 ================================================================================
 
+v0.4.9 - Presence Response Fix
+--------------------------------------------------------------------------------
+[FIX] Live-profile replies no longer trigger profession and recipe sharing. Optional profession sync starts after the initial presence exchange and retries when guild activation is not ready
+
 v0.4.8 - Guild Bank, Professions & Client Visibility
 --------------------------------------------------------------------------------
 [NEW] Guild Bank snapshots show categorized bank and bag items plus money to all guild members. Designated Guild Banks can save and sync snapshots; Personal Banks cannot publish them

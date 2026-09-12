@@ -14,6 +14,7 @@ local byName, byID = {}, {}
 for _, entry in ipairs(ORDER) do byName[entry[2]:lower()], byID[entry[1]] = entry[1], entry[2] end
 local transfers = {}
 local lastSummaryWire, lastSummaryGuild, pendingUpdate, sentCachedRecipes
+local sharingReadyAt = 0
 local CHUNK_SIZE, MAX_CHUNKS = 165, 64
 
 local function localData()
@@ -120,6 +121,7 @@ end
 
 function Professions:SendSummary(force)
     local data = self:CollectSkills()
+    if GetTime and GetTime() < sharingReadyAt then return false end
     if not iRC:IsGuildConnectionActive() then return false end
     local fields = {}
     for _, entry in ipairs(ORDER) do
@@ -333,9 +335,15 @@ eventFrame:SetScript("OnEvent", function(_, event)
     if event == "PLAYER_LOGIN" then
         Professions:CollectSkills()
         if C_Timer and C_Timer.After then
-            C_Timer.After(iRC:GetStartupTrafficDelay(), function()
-                Professions:SendSummary(true)
-            end)
+            -- Presence replies are time-sensitive. Start optional profession
+            -- and recipe sharing after the initial HELLO/activation exchange.
+            local delay = iRC:GetStartupTrafficDelay() + 15
+            sharingReadyAt = (GetTime and GetTime() or 0) + delay
+            local function sendInitialSummary()
+                if Professions:SendSummary(true) then return end
+                C_Timer.After(15, sendInitialSummary)
+            end
+            C_Timer.After(delay, sendInitialSummary)
         end
     elseif event == "SKILL_LINES_CHANGED" or event == "PLAYER_EQUIPMENT_CHANGED" or event == "BAG_UPDATE_DELAYED" then
         if pendingUpdate then return end

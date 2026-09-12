@@ -1,6 +1,6 @@
 ## Interface: 11509
-## Title: |cffff9716iRC: Guild Connect |cFF00FF00v0.4.8|r
-## Version: 0.4.8
+## Title: |cffff9716iRC: Guild Connect |cFF00FF00v0.4.9|r
+## Version: 0.4.9
 ## Notes: |cffff9716Guild connection for shared rules, verification, guild statistics, and community tools.|nConnect guilds, coordinate rules, and discover communities.|r
 ## Author: Crasling
 ## IconTexture: Interface\AddOns\iRC\Images\Logo_iRC
