@@ -1159,6 +1159,7 @@ function Dashboard:Open()
     iRC:RefreshGuildRoster()
     self:Refresh()
     frame:Show()
+    self:RequestStalePresenceIfShown()
 end
 
 function Dashboard:Toggle()
@@ -1183,11 +1184,41 @@ function Dashboard:RefreshIfShown()
     end)
 end
 
+function Dashboard:RequestStalePresenceIfShown()
+    local frame = self.frame
+    if not frame or not frame:IsShown() or frame.tab ~= "Verification"
+        or not iRC:IsGuildConnectionActive() then return false end
+    local now = time()
+    if now - (self.lastVisiblePresenceRequestAt or 0) < 60 then return false end
+    local connection = iRC:GetConnection()
+    local selfKey = iRC:NormalizeName(iRC:GetPlayerName())
+    for _, member in ipairs(iRC:GetGuildRosterSnapshot()) do
+        if member.online and iRC:NormalizeName(member.name) ~= selfKey then
+            local profile = connection and connection.members[iRC:NormalizeName(member.name)]
+            local lastSeen = profile and tonumber(profile.lastSeen)
+            if not lastSeen or lastSeen < (iRC.ConnectionSessionStartedAt or 0)
+                or now - lastSeen >= 65 then
+                -- One guild request elicits whispered replies only from online
+                -- iRC clients. Ask only while this panel needs fresher data.
+                if iRC:RequestGuildPresence(false) then
+                    self.lastVisiblePresenceRequestAt = now
+                    return true
+                end
+                return false
+            end
+        end
+    end
+    return false
+end
+
 function iRC:OpenConnectionDashboard()
     Dashboard:Open()
 end
 
 if C_Timer and C_Timer.NewTicker then
+    C_Timer.NewTicker(20, function()
+        Dashboard:RequestStalePresenceIfShown()
+    end)
     C_Timer.NewTicker(300, function()
         Dashboard:CheckAttentionReminder(true)
     end)

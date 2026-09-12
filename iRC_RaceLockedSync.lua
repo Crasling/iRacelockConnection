@@ -12,6 +12,7 @@ local moneyWatchdog
 local playedTicker, playedRequestToken
 local playedSuppressedChatFrames = {}
 local localHistory
+local sentDebugSummary = { count = 0 }
 
 local function hideAutomaticTimePlayed(_, event)
     if event == "TIME_PLAYED_MSG" and playedRequestToken then return true end
@@ -99,7 +100,19 @@ end
 local function send(prefix, payload, target)
     if not connection() or #payload > 255 then return false end
     if not iRC:SendAddonTraffic(prefix, payload, target and "WHISPER" or "GUILD", target) then return false end
-    iRC:DebugMsg(iRC:Text(prefix == IRC_ROSTER and "IRC_GF_SYNC_SENT" or "RL_SYNC_SENT", prefix), 3)
+    if iRC:GetSettings().debugMode and prefix == IRC_ROSTER and C_Timer and C_Timer.After then
+        sentDebugSummary.count = sentDebugSummary.count + 1
+        local token = {}
+        sentDebugSummary.token = token
+        C_Timer.After(2, function()
+            if sentDebugSummary.token ~= token then return end
+            local count = sentDebugSummary.count
+            sentDebugSummary = { count = 0 }
+            if count > 0 then iRC:DebugMsg(iRC:Text("IRC_GF_SYNC_SENT_SUMMARY", count), 3) end
+        end)
+    else
+        iRC:DebugMsg(iRC:Text(prefix == IRC_ROSTER and "IRC_GF_SYNC_SENT" or "RL_SYNC_SENT", prefix), 3)
+    end
     return true
 end
 

@@ -2,6 +2,17 @@
 iRC - Changelog
 ================================================================================
 
+v0.4.10 - Guild Verification & Bank Fixes
+--------------------------------------------------------------------------------
+[FIX] Guild Bank keeps its scroll position when iRC data refreshes the panel
+[ADDED] Guild Bank item search filters the current snapshot by item name
+[FIX] Guild Bank search refreshes item names as WoW loads uncached item information
+[FIX] Guild Verification retains a live iRC member's received Guild Found report and GM decision instead of showing Not verified / Unknown while their profile is fresh
+[FIX] Receiving another officer's presence poll no longer suppresses this client's own poll; authorized clients poll every minute, including during combat, so whispered replies arrive before the 90-second presence expiry
+[FIX] An open Guild Verification panel requests fresh presence when online members approach expiry, even for viewers without officer polling permission; requests are limited to once per minute
+[CHANGED] Guild Found sent-data debug messages are combined into one packet-count summary after a burst
+[CHANGED] Guild-rule edits wait five seconds after the last change before broadcasting, so rapid checkbox changes publish one final ruleset; explicit force sync remains immediate
+
 v0.4.9 - Presence Response Fix
 --------------------------------------------------------------------------------
 [FIX] Live-profile replies no longer trigger profession and recipe sharing. Optional profession sync starts after the initial presence exchange and retries when guild activation is not ready

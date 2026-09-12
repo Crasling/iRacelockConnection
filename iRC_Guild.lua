@@ -464,9 +464,9 @@ function iRC:GetGuildRosterRows()
             if profile and key ~= context.selfKey then
                 if isFreshIRCProfile(profile) then
                     -- iRC is the canonical source while its direct profile is
-                    -- live. Keep compatibility cached, but do not mix it into
-                    -- this character's row or source label.
-                    compatibilityMember, compatibility, syncedStatus = nil, nil, nil
+                    -- live. Hide the compatibility presence, but retain the
+                    -- separate iRC Guild Found report and GM decision.
+                    compatibilityMember, compatibility = nil, nil
                 elseif isFreshCompatibility(latestCompatibilityEntry(compatibilityMember, syncedStatus), profile) then
                     -- A genuinely later native response proves that iRC is no
                     -- longer the active source for this character.

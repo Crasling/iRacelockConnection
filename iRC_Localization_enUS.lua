@@ -80,6 +80,7 @@ iRC.L = {
     RL_SYNC_RECEIVED = "Received %s compatibility data from %s.",
     IRC_GF_SYNC_RECEIVED = "Received %s iRC Guild Found data from %s.",
     IRC_GF_SYNC_SENT = "Sent %s Guild Found data to iRC guild members.",
+    IRC_GF_SYNC_SENT_SUMMARY = "Sent %d Guild Found sync packet(s).",
     RL_ROSTER_PRESENT = "RaceLocked live self-report received",
     RL_MONEY_DISCREPANCY = C.Red .. "Your gold differs from the last saved amount. Guild Found is marked unclean until reviewed by your Guild Master. An interrupted save can also cause this." .. C.Reset,
     RL_LOCAL_INELIGIBLE = "Your Guild Found status must be verified and clean before trading or sending mail.",

@@ -23,6 +23,7 @@ local MAX_GUILD_BANK_WIRE = 1200
 local GUILD_BANK_CHUNK_SIZE = 80
 local profileUIRefreshPending = false
 local pendingHello = {}
+local pendingRulesBroadcast
 local profileDebugSummary = { count = 0, names = {}, scheduled = false }
 local rulesAckSummaries = {}
 local legacyRulesAckSummaries = {}
@@ -889,7 +890,24 @@ function iRC:IsRulesetBroadcaster()
     return isSelf, name, rank
 end
 
+function iRC:ScheduleConnectionRulesBroadcast()
+    if not C_Timer or not C_Timer.After then return self:SendConnectionRules(nil, true) end
+    local guildKey = self:GetGuildKey()
+    if not guildKey then return false end
+    local token = {}
+    pendingRulesBroadcast = { token = token, guildKey = guildKey }
+    C_Timer.After(5, function()
+        if not pendingRulesBroadcast or pendingRulesBroadcast.token ~= token then return end
+        pendingRulesBroadcast = nil
+        if iRC:GetGuildKey() == guildKey then iRC:SendConnectionRules(nil, true) end
+    end)
+    return true
+end
+
 function iRC:SendConnectionRules(targetName, force)
+    -- Rule edits are published only after five quiet seconds. A direct force
+    -- sync remains immediate, while routine relays wait for the final edit.
+    if pendingRulesBroadcast and not force then return false end
     if not force and self:DeferLowTraffic("traffic:rules:" .. tostring(targetName or "guild"), function() iRC:SendConnectionRules(targetName, force) end) then return false end
     if self:SuppressesRuleSending() then return false end
     local isBroadcaster = self:IsRulesetBroadcaster()
@@ -908,6 +926,7 @@ function iRC:SendConnectionRules(targetName, force)
     end
     local distribution = targetName and "WHISPER" or "GUILD"
     local backup = rulesBackupFingerprint(rules, timestampHex, timestampSource)
+    if force and not targetName then pendingRulesBroadcast = nil end
     send(self.Prefix, table.concat({
         "RULES", WIRE_VERSION,
         rules.nativeTongueOnly and "1" or "0",
@@ -979,22 +998,20 @@ function iRC:ForceGuildSync()
 end
 
 function iRC:RequestGuildPresence(isOfficerPoll)
-    -- A confirmation probe must still go out during combat. HELLO replies
-    -- already bypass Low Traffic Mode, and delaying the probe could make a
-    -- responsive client look like it has no addon.
-    if isOfficerPoll and self:DeferLowTraffic("traffic:presence-request", function() iRC:RequestGuildPresence(isOfficerPoll) end) then return false end
+    -- Presence probes and their small HELLO replies remain live in combat;
+    -- deferring either side would make an active client appear missing.
     if not self:IsGuildConnectionActive() then return false end
     if not ((C_ChatInfo and C_ChatInfo.SendAddonMessage) or SendAddonMessage) then return false end
-    if isOfficerPoll then lastPresencePollAt = time() end
     local result = send(self.Prefix, table.concat({ "PRESENCE_REQUEST", WIRE_VERSION, isOfficerPoll and "OFFICER_POLL" or "REQUEST" }, SEP), "GUILD")
     if result == false or type(result) == "number" and result ~= 0 then return false end
+    if isOfficerPoll then lastPresencePollAt = time() end
     self:DebugMsg(self:Text("PRESENCE_POLL_SENT"), 3)
     if isOfficerPoll then schedulePresenceReview() end
     return true
 end
 
 function iRC:PollGuildPresence()
-    if not self:IsGuildConnectionActive() or not self:HasGuildPermission("presence") or time() - lastPresencePollAt < 105 then return false end
+    if not self:IsGuildConnectionActive() or not self:HasGuildPermission("presence") or time() - lastPresencePollAt < 55 then return false end
     return self:RequestGuildPresence(true)
 end
 
@@ -1257,7 +1274,8 @@ local function handleMessage(prefix, message, distribution, sender)
         end
     elseif kind == "PRESENCE_REQUEST" and parts[2] == WIRE_VERSION and iRC:IsGuildMemberName(sender) then
         if parts[3] == "OFFICER_POLL" then
-            lastPresencePollAt = time()
+            -- Replies are whispered to the polling officer, not to everyone
+            -- who heard the request. Never postpone our own poll here.
             schedulePresenceReview()
         end
         iRC:DebugMsg(iRC:Text("PRESENCE_POLL_RECEIVED", sender), 3)
@@ -1904,7 +1922,7 @@ frame:SetScript("OnEvent", function(_, event, ...)
                 iRC:SendGuildFoundTradeExceptions()
                 iRC:SendGuildHomepageDescription()
             end)
-            C_Timer.NewTicker(120, function()
+            C_Timer.NewTicker(60, function()
                 iRC:PollGuildPresence()
             end)
         end

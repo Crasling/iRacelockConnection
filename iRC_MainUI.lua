@@ -734,6 +734,29 @@ function UI:Create()
         self:SetText(remaining > 0 and ("Save snapshot (" .. remaining .. "s)") or "Save snapshot")
     end)
     frame.bankSave:Hide()
+    frame.bankSearch = CreateFrame("EditBox", nil, main, "InputBoxTemplate")
+    frame.bankSearch:SetSize(260, 22)
+    frame.bankSearch:SetPoint("TOPLEFT", main, "TOPLEFT", 20, -84)
+    frame.bankSearch:SetAutoFocus(false)
+    frame.bankSearch:SetMaxLetters(80)
+    frame.bankSearch:SetTextInsets(5, 5, 0, 0)
+    frame.bankSearch.hint = main:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    frame.bankSearch.hint:SetPoint("LEFT", frame.bankSearch, "LEFT", 7, 0)
+    frame.bankSearch.hint:SetText("Search bank items")
+    frame.bankSearch:SetScript("OnTextChanged", function(self)
+        self.hint:SetShown(self:GetText() == "")
+        if frame.category == "Guild Bank" then
+            frame.scroll:SetVerticalScroll(0)
+            UI:Refresh()
+        end
+    end)
+    frame.bankSearch:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    frame.bankSearch:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+    frame.bankSearch:Hide()
+    frame.bankItemInfoEvents = CreateFrame("Frame")
+    frame.bankItemInfoEvents:SetScript("OnEvent", function()
+        if frame:IsShown() and frame.category == "Guild Bank" then UI:RefreshIfShown() end
+    end)
     frame.bankSnapshotText = content:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     frame.bankSnapshotText:SetPoint("TOPLEFT", content, "TOPLEFT", 0, 0)
     frame.bankSnapshotText:SetWidth(650)
@@ -1013,7 +1036,7 @@ local function groupedBankItems(snapshot)
         groups[category] = groups[category] or {}
         local name, link
         if GetItemInfo then name, link = GetItemInfo(item.itemID) end
-        item.name = name or ("Item #" .. item.itemID)
+        item.name = name or (item.link and item.link:match("%[(.-)%]")) or ("Item #" .. item.itemID)
         item.link = link or item.link
         groups[category][#groups[category] + 1] = item
     end
@@ -1024,6 +1047,8 @@ local function groupedBankItems(snapshot)
 end
 
 local function updateGuildBankSnapshot(frame)
+    local previousScroll = frame.scroll:GetVerticalScroll() or 0
+    local query = frame.bankSearch:GetText():lower():gsub("^%s+", ""):gsub("%s+$", "")
     for _, card in ipairs(frame.raceCards) do card:Hide() end
     for _, section in pairs(frame.factionSections) do section:Hide() end
     for _, row in ipairs(frame.memberRows) do row:Hide() end
@@ -1086,13 +1111,22 @@ local function updateGuildBankSnapshot(frame)
         local groups, totalCount = groupedBankItems(snapshot)
         addLine("Items: " .. totalCount .. " total", 24)
         local shown = {}
+        local matchCount = 0
         local function addCategory(category)
             local items = groups[category]
             if not items then return end
             shown[category] = true
-            yOffset = yOffset + 8
-            addLine("|cffffd100" .. category .. "|r (" .. #items .. " types)", 24, GameFontNormalLarge)
+            local matching = {}
             for _, item in ipairs(items) do
+                if query == "" or item.name:lower():find(query, 1, true) then
+                    matching[#matching + 1] = item
+                end
+            end
+            if #matching == 0 then return end
+            matchCount = matchCount + #matching
+            yOffset = yOffset + 8
+            addLine("|cffffd100" .. category .. "|r (" .. #matching .. " types)", 24, GameFontNormalLarge)
+            for _, item in ipairs(matching) do
                 local row = addLine("x" .. item.count .. "  " .. item.name, 27, GameFontHighlightLarge, 16)
                 row.itemID, row.itemLink = item.itemID, item.link
                 local icon = (GetItemIcon and GetItemIcon(item.itemID)) or (C_Item and C_Item.GetItemIconByID and C_Item.GetItemIconByID(item.itemID))
@@ -1111,11 +1145,16 @@ local function updateGuildBankSnapshot(frame)
         for category in pairs(groups) do if not shown[category] then otherCategories[#otherCategories + 1] = category end end
         table.sort(otherCategories)
         for _, category in ipairs(otherCategories) do addCategory(category) end
-        if totalCount == 0 then addLine("Empty", 24, GameFontHighlightLarge, 16) end
+        if query ~= "" and matchCount == 0 then
+            addLine("No matching items found.", 26, GameFontHighlightLarge, 16)
+        elseif totalCount == 0 then
+            addLine("Empty", 24, GameFontHighlightLarge, 16)
+        end
     end
     if #snapshots == 0 then addLine("No Guild Bank snapshot has been received yet.", 26) end
     frame.scrollContent:SetHeight(math.max(1, yOffset + 12))
-    frame.scroll:SetVerticalScroll(0)
+    local maxScroll = math.max(0, frame.scrollContent:GetHeight() - frame.scroll:GetHeight())
+    frame.scroll:SetVerticalScroll(math.min(previousScroll, maxScroll))
 end
 
 local function formatNumber(value)
@@ -1475,6 +1514,12 @@ function UI:Refresh()
     frame.memberProfessionSearch:SetShown(frame.category == "Guild Members")
     if frame.category ~= "Guild Members" then frame.memberProfessionSearch.suggestions:Hide() end
     frame.bankSave:SetShown(frame.category == "Guild Bank" and bankAccess)
+    frame.bankSearch:SetShown(frame.category == "Guild Bank")
+    if frame.category == "Guild Bank" then
+        frame.bankItemInfoEvents:RegisterEvent("GET_ITEM_INFO_RECEIVED")
+    else
+        frame.bankItemInfoEvents:UnregisterEvent("GET_ITEM_INFO_RECEIVED")
+    end
     frame.bankSnapshotText:Hide()
     if frame.category ~= "Guild Bank" then
         for _, row in ipairs(frame.bankSnapshotRows) do row:Hide() end
@@ -1493,7 +1538,7 @@ function UI:Refresh()
         end
     end
     frame.scroll:ClearAllPoints()
-    frame.scroll:SetPoint("TOPLEFT", frame.main, "TOPLEFT", 15, frame.category == "Race Overview" and -82 or (frame.category == "Guild Bank" and -88 or -78))
+    frame.scroll:SetPoint("TOPLEFT", frame.main, "TOPLEFT", 15, frame.category == "Race Overview" and -82 or (frame.category == "Guild Bank" and -120 or -78))
     frame.scroll:SetPoint("BOTTOMRIGHT", frame.main, "BOTTOMRIGHT", -31, 14)
     frame.cacheUpdating:SetShown(frame.category == "Race Overview" and iRC.RaceGrid and iRC.RaceGrid:IsCacheUpdating())
     local profile = getProfile(frame)
