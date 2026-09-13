@@ -156,6 +156,9 @@ function iRC:GetMemberVerification(name, online, profile, context)
             return { state = "compatible", label = (compatiblePresence.source or "RaceLocked") .. " presence " .. math.max(0, math.floor(presenceAge)) .. "s ago" }
         end
     end
+    if not self:IsAddonResponseRequired(connection) then
+        return { state = "optional", label = self:Text("VERIFICATION_RESPONSE_OPTIONAL") }
+    end
     if not profile or not profile.lastSeen then
         return { state = "missing", label = "Addon not detected" }
     end
@@ -202,6 +205,7 @@ function iRC:IsPresenceNotificationLeader()
 end
 
 local function announcePresenceMismatch(member, verification, escalated)
+    if not iRC:IsAddonResponseRequired() then return true, true end
     -- Re-elect immediately before publishing, not just when the probes began.
     if not iRC:IsPresenceNotificationLeader() or not SendChatMessage then return false end
     -- The roster row passed into this function is a snapshot. An addon reply
@@ -212,26 +216,27 @@ local function announcePresenceMismatch(member, verification, escalated)
     if liveVerification.state == "verified" or liveVerification.state == "compatible" then
         local key = iRC:NormalizeName(member.name)
         reportedPresenceMismatches[key], pendingPresenceChecks[key] = nil, nil
-        iRC:DebugMsg(iRC:Text("PRESENCE_RECOVERED", member.name), 3)
+        iRC:DebugMsg(iRC:Text("PRESENCE_RECOVERED", iRC:FormatPlayerName(member.name)), 3)
         return true, true
     end
     verification = liveVerification
     if iRC:SuppressesPresenceWarnings() then
-        iRC:DebugMsg(iRC:Text("PRESENCE_WARNING_SUPPRESSED", member.name), 3)
+        iRC:DebugMsg(iRC:Text("PRESENCE_WARNING_SUPPRESSED", iRC:FormatPlayerName(member.name)), 3)
         return true
     end
     local reason = verification.label or iRC:Text("PRESENCE_NO_LIVE_RESPONSE")
+    local displayName = iRC:FormatPlayerName(member.name)
     local officerMessage = escalated
-        and iRC:Text("PRESENCE_OFFICER_ESCALATION", member.name, reason)
-        or iRC:Text("PRESENCE_OFFICER_NOTICE", member.name, reason)
+        and iRC:Text("PRESENCE_OFFICER_ESCALATION", displayName, reason)
+        or iRC:Text("PRESENCE_OFFICER_NOTICE", displayName, reason)
     local whisperMessage = escalated
         and iRC:Text("PRESENCE_PLAYER_ESCALATION")
         or iRC:Text("PRESENCE_PLAYER_NOTICE")
     if SendChatMessage then
         if not iRC:IsAutomaticWarningDisabled("OFFICER") then SendChatMessage(officerMessage, "OFFICER") end
-        if not iRC:IsAutomaticWarningDisabled("WHISPER") then SendChatMessage(whisperMessage, "WHISPER", nil, member.name) end
+        if not iRC:IsAutomaticWarningDisabled("WHISPER") then SendChatMessage(whisperMessage, "WHISPER", nil, displayName) end
         if escalated then
-            if not iRC:IsAutomaticWarningDisabled("GUILD") then SendChatMessage(iRC:Text("PRESENCE_GUILD_ESCALATION", member.name), "GUILD") end
+            if not iRC:IsAutomaticWarningDisabled("GUILD") then SendChatMessage(iRC:Text("PRESENCE_GUILD_ESCALATION", displayName), "GUILD") end
             local occurredAt = time()
             iRC:StoreOfficerIncident({
                 id = "presence:" .. iRC:NormalizeName(member.name) .. ":" .. occurredAt,
@@ -239,7 +244,7 @@ local function announcePresenceMismatch(member, verification, escalated)
                 occurredAt = occurredAt,
                 instanceName = iRC:Text("PRESENCE_INCIDENT_LOCATION"),
                 players = reason,
-                reason = iRC:Text("PRESENCE_INCIDENT_REASON", member.name, reason),
+                reason = iRC:Text("PRESENCE_INCIDENT_REASON", displayName, reason),
             })
         end
     end
@@ -248,7 +253,13 @@ end
 
 function iRC:CheckPresenceMismatches()
     local connection = self:GetConnection()
-    if not connection or connection.active ~= true then self:ResetPresenceNotificationChecks(); return end
+    if not self:IsAddonResponseRequired(connection) then
+        self:ResetPresenceNotificationChecks()
+        if connection and connection.newMemberChecks then
+            if wipe then wipe(connection.newMemberChecks) else connection.newMemberChecks = {} end
+        end
+        return
+    end
     if self:SuppressesPresenceWarnings() then
         self:ResetPresenceNotificationChecks()
         return
@@ -285,10 +296,10 @@ function iRC:CheckPresenceMismatches()
             if connection.raceMismatchNotices[key] ~= signature and SendChatMessage and not self:IsAutomaticWarningDisabled("OFFICER") then
                 local actualRace = self:Text("GUILD_RACE_" .. member.raceCheck.actual)
                 local expectedRace = self:Text("GUILD_RACE_" .. member.raceCheck.expected)
-                local sent = pcall(SendChatMessage, self:Text("RACE_MISMATCH_OFFICER_NOTICE", member.name, actualRace, expectedRace), "OFFICER")
+                local sent = pcall(SendChatMessage, self:Text("RACE_MISMATCH_OFFICER_NOTICE", self:FormatPlayerName(member.name), actualRace, expectedRace), "OFFICER")
                 if sent then
                     connection.raceMismatchNotices[key] = signature
-                    self:DebugMsg(self:Text("RACE_MISMATCH_DETECTED", member.name, actualRace, expectedRace), 2)
+                    self:DebugMsg(self:Text("RACE_MISMATCH_DETECTED", self:FormatPlayerName(member.name), actualRace, expectedRace), 2)
                 end
             end
         else
@@ -297,7 +308,7 @@ function iRC:CheckPresenceMismatches()
         if not member.online then
             reportedPresenceMismatches[key], pendingPresenceChecks[key] = nil, nil
         elseif verification.state == "verified" or verification.state == "compatible" then
-            if reportedPresenceMismatches[key] then self:DebugMsg(self:Text("PRESENCE_RECOVERED", member.name), 3) end
+            if reportedPresenceMismatches[key] then self:DebugMsg(self:Text("PRESENCE_RECOVERED", self:FormatPlayerName(member.name)), 3) end
             reportedPresenceMismatches[key], pendingPresenceChecks[key] = nil, nil
             connection.newMemberChecks[id] = nil
         elseif verification.state == "missing" or verification.state == "stale" then
@@ -314,7 +325,7 @@ function iRC:CheckPresenceMismatches()
                         readyAt = report and dueAt or math.max(now + CONFIRMATION_WINDOW, loginReadyAt),
                     }
                     pendingPresenceChecks[key] = check
-                    self:DebugMsg(self:Text("PRESENCE_CONFIRM_PENDING", member.name), 3)
+                    self:DebugMsg(self:Text("PRESENCE_CONFIRM_PENDING", self:FormatPlayerName(member.name)), 3)
                 end
                 if check.attempts < PROBE_ATTEMPTS then
                     if now >= check.nextAt then probeBatch[#probeBatch + 1] = check
@@ -333,12 +344,12 @@ function iRC:CheckPresenceMismatches()
                             if not sent then queuePresenceReview(1); return end
                             if not recovered then
                                 reportedPresenceMismatches[key] = { reportedAt = now, escalated = false }
-                                self:DebugMsg(self:Text("PRESENCE_MISMATCH", member.name, verification.label or ""), 2)
+                                self:DebugMsg(self:Text("PRESENCE_MISMATCH", self:FormatPlayerName(member.name), verification.label or ""), 2)
                                 if connection.newMemberChecks[id] and not connection.newMemberWelcomeNotices[id] and SendChatMessage
                                     and self:IsPresenceNotificationLeader() and not self:SuppressesPresenceWarnings()
                                     and self:IsNewMemberWelcomeEnabled() then
                                     connection.newMemberWelcomeNotices[id] = now
-                                    SendChatMessage(self:Text("NEW_MEMBER_WELCOME", member.name), "GUILD")
+                                    SendChatMessage(self:Text("NEW_MEMBER_WELCOME", self:FormatPlayerName(member.name)), "GUILD")
                                 end
                                 queuePresenceReview(300 - CONFIRMATION_WINDOW)
                             end
@@ -369,7 +380,7 @@ function iRC:CheckPresenceMismatches()
 end
 
 function iRC:CheckNewMemberAddon(memberId)
-    if not self:IsGuildConnectionActive() then return true end
+    if not self:IsGuildConnectionActive() or not self:IsAddonResponseRequired() then return true end
     local connection = self:GetConnection()
     if not connection then return true end
     if connection.newMemberWelcomeNotices and connection.newMemberWelcomeNotices[memberId] then return true end
@@ -380,7 +391,7 @@ function iRC:CheckNewMemberAddon(memberId)
 end
 
 function iRC:ScheduleNewMemberAddonCheck(memberId)
-    if not self:IsGuildConnectionActive() or not C_Timer or not C_Timer.After then return end
+    if not self:IsGuildConnectionActive() or not self:IsAddonResponseRequired() or not C_Timer or not C_Timer.After then return end
     local connection = self:GetConnection()
     if not connection then return end
     connection.newMemberChecks = connection.newMemberChecks or {}

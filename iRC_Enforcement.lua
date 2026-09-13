@@ -316,7 +316,7 @@ end
 
 function Enforcement:ShowInboxRestriction(index, sender)
     iRC:RecordGuildFoundAudit("INBOX_BLOCKED", sender)
-    self:ShowGuildFoundRestriction(iRC:Text("GUILD_FOUND_INBOX_BLOCKED", sender or iRC:Text("GUILD_FOUND_UNKNOWN_SENDER")))
+    self:ShowGuildFoundRestriction(iRC:Text("GUILD_FOUND_INBOX_BLOCKED", sender and iRC:FormatPlayerName(sender) or iRC:Text("GUILD_FOUND_UNKNOWN_SENDER")))
 end
 
 function Enforcement:InstallMailAPIGuards()

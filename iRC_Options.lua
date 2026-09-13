@@ -1758,6 +1758,68 @@ if iRC:IsTestAdmin() then
     suppressRulesCheck, y = CreateSettingsCheckbox(adminContent, L.TEST_ADMIN_SUPPRESS_RULES, L.TEST_ADMIN_SUPPRESS_RULES_DESC, y,
         function() return iRC:SuppressesRuleSending() end,
         function(value) iRC:GetSettings().suppressRuleSending = value and true or false end)
+    _, y = CreateSubcategoryHeader(adminContent, L.TEST_ADMIN_TRAFFIC_HEADER, y - 5)
+    local trafficStatus
+    _, y = CreateSettingsCheckbox(adminContent, L.TEST_ADMIN_TRAFFIC_OPTION, L.TEST_ADMIN_TRAFFIC_OPTION_DESC, y,
+        function() return iRC:GetSettings().showTrafficMonitorForTesting == true end,
+        function(value)
+            iRC:GetSettings().showTrafficMonitorForTesting = value and true or false
+            iRC:SetTrafficMonitorEnabled(value)
+        end)
+    trafficStatus, y = CreateInfoText(adminContent, L.TEST_ADMIN_TRAFFIC_DISABLED, y - 2, "GameFontHighlight")
+    iRC:SetTrafficMonitorEnabled(iRC:GetSettings().showTrafficMonitorForTesting == true)
+    _, y = CreateSubcategoryHeader(adminContent, L.TEST_ADMIN_TRAFFIC_TOP_HEADER, y - 5)
+    local trafficTop = adminContent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    trafficTop:SetPoint("TOPLEFT", adminContent, "TOPLEFT", 25, y - 2)
+    trafficTop:SetSize(490, 94)
+    trafficTop:SetJustifyH("LEFT")
+    trafficTop:SetJustifyV("TOP")
+    trafficTop:SetText(L.TEST_ADMIN_TRAFFIC_EMPTY)
+    y = y - 100
+    _, y = CreateSubcategoryHeader(adminContent, L.TEST_ADMIN_CPU_HEADER, y - 5)
+    _, y = CreateSettingsCheckbox(adminContent, L.TEST_ADMIN_CPU_OPTION, L.TEST_ADMIN_CPU_OPTION_DESC, y,
+        function() return iRC:GetSettings().showFunctionProfilerForTesting == true end,
+        function(value)
+            iRC:GetSettings().showFunctionProfilerForTesting = value and true or false
+            iRC:SetFunctionProfilerEnabled(value)
+        end)
+    local cpuStatus = adminContent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    cpuStatus:SetPoint("TOPLEFT", adminContent, "TOPLEFT", 25, y - 2)
+    cpuStatus:SetSize(490, 98)
+    cpuStatus:SetJustifyH("LEFT")
+    cpuStatus:SetJustifyV("TOP")
+    cpuStatus:SetText(L.TEST_ADMIN_CPU_DISABLED)
+    y = y - 106
+    iRC:SetFunctionProfilerEnabled(iRC:GetSettings().showFunctionProfilerForTesting == true)
+    local trafficRefreshElapsed = 1
+    adminContainer:SetScript("OnUpdate", function(_, elapsed)
+        trafficRefreshElapsed = trafficRefreshElapsed + elapsed
+        if trafficRefreshElapsed < 1 then return end
+        trafficRefreshElapsed = 0
+        if iRC.TrafficMonitorEnabled then
+            local incoming, outgoing = iRC:GetTrafficBytesLastMinute()
+            trafficStatus:SetText(iRC:Text("TEST_ADMIN_TRAFFIC_BYTES", incoming, outgoing))
+            local rows, lines = iRC:GetTrafficHotspots(), {}
+            for index = 1, math.min(5, #rows) do
+                local row = rows[index]
+                lines[#lines + 1] = iRC:Text("TEST_ADMIN_TRAFFIC_ROW", row.label, row.bytes, row.incoming, row.outgoing)
+            end
+            trafficTop:SetText(#lines > 0 and table.concat(lines, "\n") or L.TEST_ADMIN_TRAFFIC_EMPTY)
+        else
+            trafficStatus:SetText(L.TEST_ADMIN_TRAFFIC_DISABLED)
+            trafficTop:SetText(L.TEST_ADMIN_TRAFFIC_DISABLED)
+        end
+        if iRC.FunctionProfilerEnabled then
+            local rows, lines = iRC:GetFunctionHotspots(), {}
+            for index = 1, math.min(5, #rows) do
+                local row = rows[index]
+                lines[#lines + 1] = iRC:Text("TEST_ADMIN_CPU_ROW", row.label, row.ms, row.calls)
+            end
+            cpuStatus:SetText(#lines > 0 and table.concat(lines, "\n") or L.TEST_ADMIN_CPU_EMPTY)
+        else
+            cpuStatus:SetText(type(debugprofilestop) == "function" and L.TEST_ADMIN_CPU_DISABLED or L.TEST_ADMIN_CPU_UNAVAILABLE)
+        end
+    end)
     testActivateGuildButton, y = CreateSettingsButton(adminContent, L.TEST_ADMIN_ACTIVATE_GUILD, 190, y - 4, function()
         iRC:ActivateGuildForTesting()
     end, L.TEST_ADMIN_ACTIVATE_GUILD_DESC)

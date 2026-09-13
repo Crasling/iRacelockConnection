@@ -35,6 +35,7 @@ end
 
 local function ruleViolationWhisper(member)
     if not member or not member.name then return nil end
+    if not iRC:IsAddonResponseRequired() then return nil end
     local verification = member.verification or {}
     local liveState = verification.state
     local hasLiveAddon = liveState == "verified" or liveState == "compatible"
@@ -250,14 +251,14 @@ function Dashboard:Create()
     frame.subtitle:SetJustifyH("LEFT")
     frame.subtitle:SetWordWrap(true)
     frame.summaryCards = {}
-    for index = 1, 4 do
+    for index = 1, 5 do
         local card = makeSummaryCard(main)
         card:SetSize(172, 54)
         card:SetPoint("TOPLEFT", main, "TOPLEFT", 15 + (index - 1) * 178, -66)
         frame.summaryCards[index] = card
     end
     frame.filterButtons, frame.filters, frame.headers = {}, {}, {}
-    for index = 1, 4 do
+    for index = 1, 5 do
         local button = CreateFrame("Button", nil, main, "BackdropTemplate")
         button:SetSize(160, 27)
         button:SetPoint("TOPLEFT", main, "TOPLEFT", 15 + (index - 1) * 166, -124)
@@ -507,7 +508,7 @@ function Dashboard:Create()
         { group = "MEMBER_MENU_GROUP_DETAILS", label = "MEMBER_MENU_VIEW_REPORT", run = showGuildFoundReport },
         { group = "MEMBER_MENU_GROUP_CONTACT", label = "MEMBER_MENU_WHISPER_RULE_VIOLATION", violationOnly = true, run = function(targetName, member)
             local message = ruleViolationWhisper(member)
-            if message and SendChatMessage then SendChatMessage(message, "WHISPER", nil, targetName) end
+            if message and SendChatMessage then SendChatMessage(message, "WHISPER", nil, displayMemberName(targetName)) end
         end },
         { group = "MEMBER_MENU_GROUP_CONTACT", label = "MEMBER_MENU_REQUEST_IRC", run = function(targetName)
             if iRC:IsGuildConnectionActive() then
@@ -618,6 +619,10 @@ local function setFilters(frame, choices)
     for index, button in ipairs(frame.filterButtons) do
         local choice = choices[index]
         if choice then
+            local five = #choices == 5
+            button:SetSize(five and 130 or 160, 27)
+            button:ClearAllPoints()
+            button:SetPoint("TOPLEFT", frame.main, "TOPLEFT", 15 + (index - 1) * (five and 136 or 166), -124)
             local active = choice.id == selected
             button.text:SetText(choice.label)
             button.activeGlow:SetColorTexture(ORANGE[1], ORANGE[2], ORANGE[3], active and 0.18 or 0)
@@ -705,12 +710,18 @@ end
 local function setSummaryCards(frame, cards)
     for index, card in ipairs(frame.summaryCards) do
         local item = cards[index] or {}
+        if not item.label then card:Hide() else
+        local five = #cards == 5
+        card:SetSize(five and 135 or 172, 54)
+        card:ClearAllPoints()
+        card:SetPoint("TOPLEFT", frame.main, "TOPLEFT", 15 + (index - 1) * (five and 141 or 178), -66)
         card.label:SetText(item.label or "")
         card.value:SetText(item.value or "")
         local color = item.color or ORANGE
         card.value:SetTextColor(unpack(color))
         card:SetBackdropBorderColor(color[1], color[2], color[3], 0.72)
         card:Show()
+        end
     end
 end
 
@@ -768,6 +779,7 @@ end
 local function getEffectiveVerificationState(member, progressionMode, usesGuildFound, connection)
     if member.raceMismatch then return "attention" end
     local state = member.verification and member.verification.state or "missing"
+    if state == "optional" then return state end
     local hasLiveAddon = state == "verified" or state == "compatible"
     local guildFoundStatus = memberGuildFoundStatus(member)
     -- Gold monitoring applies to every native iRC member, including
@@ -799,7 +811,7 @@ function Dashboard:GetNeedsAttentionCount()
     local connection = iRC:GetConnection()
     for _, member in ipairs(iRC:GetGuildRosterRows()) do
         local state = getEffectiveVerificationState(member, progressionMode, usesGuildFound, connection)
-        if state ~= "verified" and state ~= "compatible" and state ~= "offline" and state ~= "inactive" then
+        if state ~= "verified" and state ~= "compatible" and state ~= "offline" and state ~= "inactive" and state ~= "optional" then
             attention = attention + 1
         end
     end
@@ -828,7 +840,7 @@ function Dashboard:CheckAttentionReminder(periodic)
     local current, count, added = {}, 0, false
     for _, member in ipairs(iRC:GetGuildRosterRows()) do
         local state = getEffectiveVerificationState(member, progressionMode, usesGuildFound)
-        if state ~= "verified" and state ~= "compatible" and state ~= "offline" and state ~= "inactive" then
+        if state ~= "verified" and state ~= "compatible" and state ~= "offline" and state ~= "inactive" and state ~= "optional" then
             local key = iRC:NormalizeName(member.name)
             current[key] = true
             count = count + 1
@@ -921,9 +933,10 @@ function Dashboard:Refresh()
             setRow(frame, count, { group.race, group.members .. " / " .. group.averageLevel, group.addonUsers .. " / " .. group.selfFound, classSummary(group.classes) }, ORANGE)
         end
     elseif frame.tab == "Verification" then
-        local verified, compatible, attention, offline = 0, 0, 0, 0
+        local verified, compatible, optional, attention, offline = 0, 0, 0, 0, 0
         local members = iRC:GetGuildRosterRows()
         local rules = iRC:GetConnectionRules() or {}
+        local responseRequired = iRC:IsAddonResponseRequired(connection)
         local progressionMode = iRC:GetProgressionMode(rules)
         local guildFoundRequired = iRC:IsGuildFoundRequired(connection)
         local usesSelfFound = progressionMode == "SELF_FOUND" or progressionMode == "SELF_FOUND_OR_GUILD_FOUND"
@@ -945,26 +958,30 @@ function Dashboard:Refresh()
             local state = effectiveVerificationState(member)
             if state == "verified" then verified = verified + 1
             elseif state == "compatible" then compatible = compatible + 1
+            elseif state == "optional" then optional = optional + 1
             elseif state == "offline" or state == "inactive" then offline = offline + 1
             else attention = attention + 1 end
         end
-        setSummaryCards(frame, {
+        local cards = {
             { label = "Verified", value = tostring(verified), color = GREEN },
             { label = "Compatible", value = tostring(compatible), color = ORANGE },
-            { label = "Needs attention", value = tostring(attention), color = RED },
-            { label = "Offline", value = tostring(offline), color = GRAY },
-        })
-        local filter = setFilters(frame, {
-            { id = "all", label = "All members" }, { id = "attention", label = "Needs attention", flash = attention > 0 }, { id = "verified", label = "Verified" }, { id = "compatible", label = "Compatible" },
-        })
+        }
+        if not responseRequired then cards[#cards + 1] = { label = iRC:Text("VERIFICATION_OPTIONAL_CARD"), value = tostring(optional), color = GRAY } end
+        cards[#cards + 1] = { label = "Needs attention", value = tostring(attention), color = RED }
+        cards[#cards + 1] = { label = "Offline", value = tostring(offline), color = GRAY }
+        setSummaryCards(frame, cards)
+        local filters = { { id = "all", label = "All members" }, { id = "attention", label = "Needs attention", flash = attention > 0 },
+            { id = "verified", label = "Verified" }, { id = "compatible", label = "Compatible" } }
+        if not responseRequired then filters[#filters + 1] = { id = "optional", label = iRC:Text("VERIFICATION_OPTIONAL_CARD") } end
+        local filter = setFilters(frame, filters)
         frame.title:SetText("Guild verification")
-        frame.subtitle:SetText("Live presence status. Missing or stale online members are handled by the officer notification system.")
+        frame.subtitle:SetText(iRC:Text(responseRequired and "VERIFICATION_RESPONSE_REQUIRED_DESC" or "VERIFICATION_RESPONSE_OPTIONAL_DESC"))
         setHeaders(frame,
             { "Member", "Race / Class", "Level", "Live status", progressHeader, iRC:Text("VERIFICATION_STATUS_COLUMN") },
             { "name", "race", "level", "status", "progress", "clean" }, "name")
         members = filterAndSort(frame, members, function(member)
             local state = effectiveVerificationState(member)
-            return filter == "all" or state == filter or (filter == "attention" and state ~= "verified" and state ~= "compatible" and state ~= "offline" and state ~= "inactive")
+            return filter == "all" or state == filter or (filter == "attention" and state ~= "verified" and state ~= "compatible" and state ~= "offline" and state ~= "inactive" and state ~= "optional")
         end, function(member, key)
             if key == "name" then return member.name or "" end
             if key == "race" then return (member.race or "") .. (member.class or "") end
@@ -1084,7 +1101,7 @@ function Dashboard:Refresh()
             local color = effectiveState == "attention" and RED
                 or (verification.state == "verified" and GREEN
                 or (verification.state == "compatible" and RED
-                or ((verification.state == "offline" or verification.state == "inactive") and GRAY or RED)))
+                or ((verification.state == "offline" or verification.state == "inactive" or verification.state == "optional") and GRAY or RED)))
             local data = setRow(frame, count, { displayMemberName(member.name), member.race .. " / " .. member.class, tostring(member.level), addon, progressText, cleanText }, color, function(_, mouseButton)
                 if mouseButton == "RightButton" then
                     openMemberManagementMenu(frame, selectedMember)
@@ -1187,7 +1204,7 @@ end
 function Dashboard:RequestStalePresenceIfShown()
     local frame = self.frame
     if not frame or not frame:IsShown() or frame.tab ~= "Verification"
-        or not iRC:IsGuildConnectionActive() then return false end
+        or not iRC:IsGuildConnectionActive() or not iRC:IsAddonResponseRequired() then return false end
     local now = time()
     if now - (self.lastVisiblePresenceRequestAt or 0) < 60 then return false end
     local connection = iRC:GetConnection()

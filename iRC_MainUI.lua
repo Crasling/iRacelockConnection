@@ -468,6 +468,7 @@ local function createMemberProfessionSearch(main, frame)
         if frame.allMemberData then applyMemberSearch(frame) end
     end)
     search.edit:SetScript("OnEditFocusGained", function() updateMemberSuggestions(frame) end)
+    search.edit:SetScript("OnEditFocusLost", function() search.suggestions:Hide() end)
     search.edit:SetScript("OnEscapePressed", function(self) self:ClearFocus(); search.suggestions:Hide() end)
     search.edit:SetScript("OnEnterPressed", function(self)
         local first = search.buttons[1]
@@ -794,6 +795,7 @@ function UI:Create()
     local memberMenu = CreateFrame("Frame", nil, frame, "BackdropTemplate")
     memberMenu:SetSize(270, 132)
     memberMenu:SetFrameStrata("DIALOG")
+    memberMenu:SetFrameLevel(frame:GetFrameLevel() + 30)
     memberMenu:SetClampedToScreen(true)
     createBackdrop(memberMenu, { 0.035, 0.028, 0.02, 0.99 }, { COLORS.gold[1], COLORS.gold[2], COLORS.gold[3], 1 })
     memberMenu.title = memberMenu:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
@@ -833,7 +835,7 @@ function UI:Create()
     memberMenu.whisper:SetScript("OnClick", function()
         local profile = memberMenu.profile
         memberMenu:Hide()
-        if profile and ChatFrame_SendTell then ChatFrame_SendTell(profile.name) end
+        if profile and ChatFrame_SendTell then ChatFrame_SendTell(iRC:FormatPlayerName(profile.name)) end
     end)
     memberMenu:Hide()
     frame.memberMenu = memberMenu
@@ -841,6 +843,11 @@ function UI:Create()
     local outsideClickWatcher = CreateFrame("Frame")
     outsideClickWatcher:RegisterEvent("GLOBAL_MOUSE_DOWN")
     outsideClickWatcher:SetScript("OnEvent", function()
+        local professionSearch = frame.memberProfessionSearch
+        if frame:IsShown() and frame.category == "Guild Members" and professionSearch.edit:HasFocus()
+            and not MouseIsOver(professionSearch.edit) and not MouseIsOver(professionSearch.suggestions) then
+            professionSearch.edit:ClearFocus()
+        end
         if memberMenu:IsShown() and not MouseIsOver(memberMenu) then memberMenu:Hide() end
         if professionReport:IsShown() and not MouseIsOver(professionReport) then professionReport:Hide() end
     end)
@@ -1359,7 +1366,7 @@ local function setRaceCard(card, group, rank)
                     iRC:Print(iRC:Text("GUILD_CONTACT_CROSS_FACTION"))
                     return
                 end
-                if ChatFrame_SendTell then ChatFrame_SendTell(contactName) end
+                if ChatFrame_SendTell then ChatFrame_SendTell(iRC:FormatPlayerName(contactName)) end
             end)
             button:SetScript("OnEnter", function(self)
                 GameTooltip:SetOwner(self, "ANCHOR_TOP"); GameTooltip:SetText(iRC:Text("GUILD_CONTACT_WHISPER", displayName)); GameTooltip:Show()

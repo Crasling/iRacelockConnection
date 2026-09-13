@@ -60,6 +60,7 @@ local function send(prefix, message, distribution, target)
         local single = prefix .. ":" .. hex
         if #single <= 255 then
             local called = pcall(SendChatMessage, single, "CHANNEL", nil, id)
+            if called then iRC:RecordTrafficBytes("out", #single, PREFIX, "CHANNEL") end
             if called and message:match("^GUILD_REPORT") then iRC:DebugMsg(iRC:Text("RACEGRID_PACKAGE_SENDING", 1, 1), 3) end
             return called
         end
@@ -72,6 +73,7 @@ local function send(prefix, message, distribution, target)
             local wire = table.concat({ prefix, "C", messageId, part, total, chunk }, ":")
             local called = pcall(SendChatMessage, wire, "CHANNEL", nil, id)
             if not called then return false end
+            iRC:RecordTrafficBytes("out", #wire, PREFIX, "CHANNEL")
             iRC:DebugMsg(iRC:Text("RACEGRID_PACKAGE_SENDING", part, total), 3)
         end
         return true

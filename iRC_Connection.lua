@@ -29,6 +29,13 @@ local rulesAckSummaries = {}
 local legacyRulesAckSummaries = {}
 iRC.ConnectionSessionStartedAt = time()
 
+local function displayPlayerList(names)
+    return (tostring(names or ""):gsub("[^,]+", function(name)
+        local leading, player, trailing = name:match("^(%s*)(.-)(%s*)$")
+        return leading .. iRC:FormatPlayerName(player) .. trailing
+    end))
+end
+
 local function supportsCurrentRuleset(version)
     local parts = {}
     for value in tostring(version or ""):gmatch("%d+") do
@@ -1099,7 +1106,7 @@ function iRC:UploadGuildFoundAudit(targetName)
             sentCount = sentCount + 1
         end
     end
-    if sentCount > 0 then self:DebugMsg(self:Text("GUILDFOUND_AUDIT_HISTORY_SENT", sentCount, targetName), 3) end
+    if sentCount > 0 then self:DebugMsg(self:Text("GUILDFOUND_AUDIT_HISTORY_SENT", sentCount, self:FormatPlayerName(targetName)), 3) end
     return sentCount > 0
 end
 
@@ -1116,7 +1123,7 @@ function iRC:SendGroupViolation(record)
         seenGroupViolations[violationId] = true
         record.reporter = record.reporter or self:GetPlayerName()
         self:StoreOfficerIncident(record)
-        if not self:IsAutomaticWarningDisabled("OFFICER") then SendChatMessage(self:Text("GROUP_VIOLATION_OFFICER", self:GetPlayerName(), instanceName, players), "OFFICER") end
+        if not self:IsAutomaticWarningDisabled("OFFICER") then SendChatMessage(self:Text("GROUP_VIOLATION_OFFICER", self:FormatPlayerName(self:GetPlayerName()), instanceName, displayPlayerList(players)), "OFFICER") end
         locallyReported = true
     end
     return locallyReported
@@ -1168,7 +1175,7 @@ function iRC:UploadOfficerIncidentsToGM(targetName)
             uploaded = true
         end
     end
-    if uploaded then self:DebugMsg(self:Text("INCIDENTS_UPLOADED_TO_GM", targetName), 3) end
+    if uploaded then self:DebugMsg(self:Text("INCIDENTS_UPLOADED_TO_GM", self:FormatPlayerName(targetName)), 3) end
     return uploaded
 end
 
@@ -1298,7 +1305,7 @@ local function handleMessage(prefix, message, distribution, sender)
                     id = violationId, reporter = sender, occurredAt = occurredAt,
                     instanceName = instanceName, players = players,
                 })
-                if not iRC:IsAutomaticWarningDisabled("OFFICER") then SendChatMessage(iRC:Text("GROUP_VIOLATION_OFFICER", sender, instanceName, players), "OFFICER") end
+                if not iRC:IsAutomaticWarningDisabled("OFFICER") then SendChatMessage(iRC:Text("GROUP_VIOLATION_OFFICER", iRC:FormatPlayerName(sender), instanceName, displayPlayerList(players)), "OFFICER") end
             end
             -- Always acknowledge a valid repeat. The first acknowledgement may
             -- have been lost even though the officer notice was already sent.

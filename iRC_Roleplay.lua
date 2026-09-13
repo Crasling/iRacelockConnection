@@ -261,34 +261,43 @@ local function applyReplacements(text, replacements)
     return text
 end
 
+-- Preserve WoW hyperlinks, including the displayed item/spell/quest name.
+local function transformOutsideLinks(text, phraseList, wordList, apostropheEncoding)
+    local parts, cursor = {}, 1
+    local function transformPlain(segment)
+        if apostropheEncoding then segment = segment:gsub(apostropheEncoding, "'") end
+        if phraseList then segment = applyReplacements(segment, phraseList) end
+        return applyReplacements(segment, wordList)
+    end
+    while true do
+        local first, last = text:find("|H.-|h.-|h", cursor)
+        if not first then break end
+        parts[#parts + 1] = transformPlain(text:sub(cursor, first - 1))
+        parts[#parts + 1] = text:sub(first, last)
+        cursor = last + 1
+    end
+    parts[#parts + 1] = transformPlain(text:sub(cursor))
+    return table.concat(parts)
+end
+
 function Roleplay:TransformTrollTalk(text)
     if type(text) ~= "string" or text == "" or text:match("^%s*/") then return text end
-    text = text:gsub("’", "'")
-    text = applyReplacements(text, phraseReplacements)
-    text = applyReplacements(text, wordReplacements)
-    return text
+    return transformOutsideLinks(text, phraseReplacements, wordReplacements, "’")
 end
 
 function Roleplay:TransformTaurenTalk(text)
     if type(text) ~= "string" or text == "" or text:match("^%s*/") then return text end
-    text = text:gsub("â€™", "'")
-    text = applyReplacements(text, taurenPhraseReplacements)
-    text = applyReplacements(text, taurenWordReplacements)
-    return text
+    return transformOutsideLinks(text, taurenPhraseReplacements, taurenWordReplacements, "â€™")
 end
 
 function Roleplay:TransformNightElfTalk(text)
     if type(text) ~= "string" or text == "" or text:match("^%s*/") then return text end
-    text = applyReplacements(text, nightElfPhraseReplacements)
-    text = applyReplacements(text, nightElfWordReplacements)
-    return text
+    return transformOutsideLinks(text, nightElfPhraseReplacements, nightElfWordReplacements)
 end
 
 function Roleplay:TransformUndeadSpeak(text)
     if type(text) ~= "string" or text == "" or text:match("^%s*/") then return text end
-    text = applyReplacements(text, undeadPhraseReplacements)
-    text = applyReplacements(text, undeadWordReplacements)
-    return text
+    return transformOutsideLinks(text, undeadPhraseReplacements, undeadWordReplacements)
 end
 
 local hookedEditBoxes = setmetatable({}, { __mode = "k" })
@@ -297,15 +306,17 @@ local function transformEditBox(editBox)
     if not editBox or not editBox.GetText or not editBox.SetText then return end
     local text = editBox:GetText()
     if type(text) ~= "string" or text == "" or text:match("^%s*/") then return end
+    local transformed
     if Roleplay:IsTrollTalkEnabled() then
-        editBox:SetText(Roleplay:TransformTrollTalk(text))
+        transformed = Roleplay:TransformTrollTalk(text)
     elseif Roleplay:IsTaurenTalkEnabled() then
-        editBox:SetText(Roleplay:TransformTaurenTalk(text))
+        transformed = Roleplay:TransformTaurenTalk(text)
     elseif Roleplay:IsNightElfTalkEnabled() then
-        editBox:SetText(Roleplay:TransformNightElfTalk(text))
+        transformed = Roleplay:TransformNightElfTalk(text)
     elseif Roleplay:IsUndeadSpeakEnabled() then
-        editBox:SetText(Roleplay:TransformUndeadSpeak(text))
+        transformed = Roleplay:TransformUndeadSpeak(text)
     end
+    if transformed and transformed ~= text then editBox:SetText(transformed) end
 end
 
 local function installChatEditBoxHooks()

@@ -1,6 +1,6 @@
 ## Interface: 11509
-## Title: |cffff9716iRC: Guild Connect |cFF00FF00v0.4.11|r
-## Version: 0.4.11
+## Title: |cffff9716iRC: Guild Connect |cFF00FF00v0.4.12|r
+## Version: 0.4.12
 ## Notes: |cffff9716Guild connection for shared rules, verification, guild statistics, and community tools.|nConnect guilds, coordinate rules, and discover communities.|r
 ## Author: Crasling
 ## IconTexture: Interface\AddOns\iRC\Images\Logo_iRC
@@ -16,7 +16,7 @@ embeds.xml
 
 iRC_Core.lua
 iRC_Profanity.lua
-iRC_Localization_enUS.lua
+Localization\locale.xml
 iRC_Connection.lua
 iRC_GuildMap.lua
 iRC_RaceGrid.lua

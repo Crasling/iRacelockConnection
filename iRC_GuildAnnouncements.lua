@@ -18,6 +18,7 @@ Announcements.Icons = {
     selfFound = "Interface\\AddOns\\iRC\\Images\\Icons\\SF_Icon.blp",
     guildFound = "Interface\\AddOns\\iRC\\Images\\Icons\\GF_Icon.blp",
     guildMaster = "Interface\\AddOns\\iRC\\Images\\Icons\\GM_Icon.blp",
+    officer1 = "Interface\\AddOns\\iRC\\Images\\Icons\\Officer1_Icon.blp",
     violation = "Interface\\AddOns\\iRC\\Images\\Icons\\X_Icon.blp",
 }
 
@@ -52,7 +53,20 @@ function Announcements:GetUnlockedIcons(name)
     local rank = getRosterRank(name)
     if rank == nil then return unlocked end
     local key = iRC:NormalizeName(name)
-    if rank == 0 then unlocked.guildMaster = true end
+    if rank == 0 then
+        unlocked.guildMaster = true
+    else
+        local connection = iRC:GetConnection()
+        if connection and connection.active == true then
+            for permission, defaultRank in pairs(iRC.DefaultRankPermissions) do
+                local delegatedRank = tonumber(connection.rankPermissions and connection.rankPermissions[permission]) or defaultRank
+                if rank <= delegatedRank then
+                    unlocked.officer1 = true
+                    break
+                end
+            end
+        end
+    end
     local connection = iRC:GetConnection()
     local isSelf = key == iRC:NormalizeName(iRC:GetPlayerName())
     local profile = isSelf and iRC:GetLocalProfile() or connection and connection.members and connection.members[key]
@@ -98,6 +112,7 @@ function Announcements:GetDefaultChatIcon(name)
     local unlocked = self:GetUnlockedIcons(name)
     if unlocked.violation then return self.Icons.violation, "violation" end
     if unlocked.guildMaster then return self.Icons.guildMaster, "guildMaster" end
+    if unlocked.officer1 then return self.Icons.officer1, "officer1" end
     if unlocked.selfFound then return self.Icons.selfFound, "selfFound" end
     if unlocked.guildFound then return self.Icons.guildFound, "guildFound" end
 end
@@ -185,18 +200,14 @@ function Announcements:ReceiveIconWire(message, distribution, sender)
     end
 end
 
-local DEATH_TEXT = "has perished."
-local LEVEL60_TEXT = "has reached Lv 60."
-local TEST_DEATH_TEXT = "[iRC TEST] has perished."
-local TEST_LEVEL60_TEXT = "[iRC TEST] has reached Lv 60."
-
 local ICON_HELP = {
-    death = { "Chat icon: Death", "This character's death was announced to the guild." },
-    level60 = { "Chat icon: Level 60", "This character reached level 60." },
-    selfFound = { "Chat icon: Self-Found", "This character currently has Self-Found active." },
-    guildFound = { "Chat icon: Guild Found", "This character has verified Guild Found status." },
-    guildMaster = { "Chat icon: Guild Master", "This character is the guild's rank-0 Guild Master." },
-    violation = { "Chat icon: Rule violation", "This character currently has an active guild-rule violation. Check Guild Verification for details." },
+    death = { "CHAT_ICON_DEATH_TITLE", "CHAT_ICON_DEATH_DESC" },
+    level60 = { "CHAT_ICON_LEVEL60_TITLE", "CHAT_ICON_LEVEL60_DESC" },
+    selfFound = { "CHAT_ICON_SELF_FOUND_TITLE", "CHAT_ICON_SELF_FOUND_DESC" },
+    guildFound = { "CHAT_ICON_GUILD_FOUND_TITLE", "CHAT_ICON_GUILD_FOUND_DESC" },
+    guildMaster = { "CHAT_ICON_GUILD_MASTER_TITLE", "CHAT_ICON_GUILD_MASTER_DESC" },
+    officer1 = { "CHAT_ICON_OFFICER_TITLE", "CHAT_ICON_OFFICER_DESC" },
+    violation = { "CHAT_ICON_VIOLATION_TITLE", "CHAT_ICON_VIOLATION_DESC" },
 }
 
 local function iconLink(kind, icon, size)
@@ -205,13 +216,16 @@ end
 
 local hookedChatFrames = {}
 local activeTooltipChatFrame
+local tooltipMouseWasEnabled
 local function hideChatIconTooltip(chatFrame)
     if activeTooltipChatFrame ~= chatFrame then return end
     activeTooltipChatFrame = nil
     if GameTooltip and GameTooltip.iRCChatIconOwner == chatFrame then
         GameTooltip.iRCChatIconOwner = nil
         GameTooltip:Hide()
+        if tooltipMouseWasEnabled ~= nil then GameTooltip:EnableMouse(tooltipMouseWasEnabled) end
     end
+    tooltipMouseWasEnabled = nil
 end
 local function hookChatTooltip(chatFrame)
     if not chatFrame or not chatFrame.HookScript or hookedChatFrames[chatFrame] then return end
@@ -225,13 +239,16 @@ local function hookChatTooltip(chatFrame)
         end
         activeTooltipChatFrame = self
         GameTooltip.iRCChatIconOwner = self
+        if tooltipMouseWasEnabled == nil and GameTooltip.IsMouseEnabled then
+            tooltipMouseWasEnabled = GameTooltip:IsMouseEnabled()
+        end
+        GameTooltip:EnableMouse(false)
         GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
-        GameTooltip:SetText(help[1], 1, 0.72, 0.22)
-        GameTooltip:AddLine(help[2], 1, 1, 1, true)
+        GameTooltip:SetText(iRC:Text(help[1]), 1, 0.72, 0.22)
+        GameTooltip:AddLine(iRC:Text(help[2]), 1, 1, 1, true)
         GameTooltip:Show()
     end)
     chatFrame:HookScript("OnHyperlinkLeave", hideChatIconTooltip)
-    chatFrame:HookScript("OnLeave", hideChatIconTooltip)
 end
 
 local function canAnnounce(ruleKey)
@@ -246,21 +263,21 @@ function Announcements:AnnounceDeath()
     local now = time()
     if now - (tonumber(iRCCharDB.lastGuildDeathAnnouncementAt) or 0) < 30 then return false end
     iRCCharDB.lastGuildDeathAnnouncementAt = now
-    return pcall(SendChatMessage, DEATH_TEXT, "GUILD")
+    return pcall(SendChatMessage, iRC:Text("CHAT_ANNOUNCE_DEATH"), "GUILD")
 end
 
 function Announcements:AnnounceLevel60(level)
     if tonumber(level) ~= 60 or not canAnnounce("disableGuildLevel60Message") then return false end
     iRCCharDB = iRCCharDB or {}
     if iRCCharDB.guildLevel60AnnouncementSent then return false end
-    local sent = pcall(SendChatMessage, LEVEL60_TEXT, "GUILD")
+    local sent = pcall(SendChatMessage, iRC:Text("CHAT_ANNOUNCE_LEVEL60"), "GUILD")
     if sent then iRCCharDB.guildLevel60AnnouncementSent = true end
     return sent
 end
 
 function Announcements:SendTest(kind)
     if not iRC:IsTestAdmin() or not iRC:IsGuildConnectionActive() or not SendChatMessage then return false end
-    local message = kind == "death" and TEST_DEATH_TEXT or kind == "level60" and TEST_LEVEL60_TEXT
+    local message = kind == "death" and iRC:Text("CHAT_ANNOUNCE_TEST_DEATH") or kind == "level60" and iRC:Text("CHAT_ANNOUNCE_TEST_LEVEL60")
     if not message then return false end
     return pcall(SendChatMessage, message, "GUILD")
 end
@@ -268,8 +285,8 @@ end
 local function addGuildAnnouncementIcon(chatFrame, _, message, author, ...)
     if type(message) ~= "string" or not author or author == "" then return false end
     local icon, iconKind
-    if message == DEATH_TEXT or message == TEST_DEATH_TEXT then icon, iconKind = Announcements.Icons.death, "death"
-    elseif message == LEVEL60_TEXT or message == TEST_LEVEL60_TEXT then icon, iconKind = Announcements.Icons.level60, "level60" end
+    if message == iRC:Text("CHAT_ANNOUNCE_DEATH") or message == iRC:Text("CHAT_ANNOUNCE_TEST_DEATH") then icon, iconKind = Announcements.Icons.death, "death"
+    elseif message == iRC:Text("CHAT_ANNOUNCE_LEVEL60") or message == iRC:Text("CHAT_ANNOUNCE_TEST_LEVEL60") then icon, iconKind = Announcements.Icons.level60, "level60" end
     local size = 16
     if chatFrame and chatFrame.GetFont then
         local _, fontSize = chatFrame:GetFont()

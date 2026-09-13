@@ -9,6 +9,69 @@ local POSITION_VERSION = "1"
 local POSITION_LIFETIME = 90
 local initialized, mapInitialized, positionSendPending
 local mapTicker
+local pinMenu
+
+local function hidePinMenu()
+    if pinMenu then pinMenu:Hide() end
+end
+
+local function showPinMenu(pin)
+    if not pin.playerName then return end
+    if not pinMenu then
+        pinMenu = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+        pinMenu:SetSize(120, 58)
+        pinMenu:SetFrameStrata("FULLSCREEN_DIALOG")
+        pinMenu:SetClampedToScreen(true)
+        pinMenu:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
+        pinMenu:SetBackdropColor(0.025, 0.02, 0.015, 0.97)
+        pinMenu:SetBackdropBorderColor(0.65, 0.43, 0.15, 1)
+        pinMenu:EnableMouse(true)
+        local function addAction(offset, prefix, action)
+            local button = CreateFrame("Button", nil, pinMenu, "BackdropTemplate")
+            button:SetHeight(23)
+            button:SetPoint("TOPLEFT", 5, offset)
+            button:SetPoint("TOPRIGHT", -5, offset)
+            button:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8" })
+            button:SetBackdropColor(0.09, 0.07, 0.045, 0.9)
+            button:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
+            button.text = button:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            button.text:SetPoint("LEFT", 8, 0)
+            button:SetScript("OnClick", function()
+                local name = pinMenu.playerName
+                hidePinMenu()
+                if name then action(name) end
+            end)
+            button.prefix = prefix
+            return button
+        end
+        pinMenu.whisper = addAction(-5, "Whisper ", function(name)
+            if ChatFrame_SendTell then ChatFrame_SendTell(iRC:FormatPlayerName(name)) end
+        end)
+        pinMenu.invite = addAction(-30, "Invite ", function(name)
+            if C_PartyInfo and C_PartyInfo.InviteUnit then
+                C_PartyInfo.InviteUnit(name)
+            elseif InviteUnit then
+                InviteUnit(name)
+            end
+        end)
+        pinMenu:Hide()
+        local outsideClickWatcher = CreateFrame("Frame")
+        outsideClickWatcher:RegisterEvent("GLOBAL_MOUSE_DOWN")
+        outsideClickWatcher:SetScript("OnEvent", function()
+            if pinMenu:IsShown() and not MouseIsOver(pinMenu) then hidePinMenu() end
+        end)
+    end
+    pinMenu.playerName = pin.playerName
+    local shortName = iRC:FormatPlayerName(pin.playerName)
+    pinMenu.whisper.text:SetText(pinMenu.whisper.prefix .. shortName)
+    pinMenu.invite.text:SetText(pinMenu.invite.prefix .. shortName)
+    pinMenu:SetWidth(math.max(100, math.ceil(math.max(pinMenu.whisper.text:GetStringWidth(), pinMenu.invite.text:GetStringWidth())) + 26))
+    local x, y = GetCursorPosition()
+    local scale = UIParent:GetEffectiveScale()
+    pinMenu:ClearAllPoints()
+    pinMenu:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x / scale, y / scale)
+    pinMenu:Show()
+end
 
 local function enabled()
     return iRC:IsGuildConnectionActive() and iRC:GetConnectionRules().guildMapEnabled == true
@@ -21,6 +84,7 @@ end
 local function clearPin(name)
     local pin = GuildMap.pins[name]
     if not pin then return end
+    if pinMenu and pinMenu:IsShown() and pinMenu.playerName == pin.playerName then hidePinMenu() end
     pin:Hide()
     pin.playerName, pin.classFile, pin.level = nil, nil, nil
     GuildMap.pins[name] = nil
@@ -74,6 +138,12 @@ local function acquirePin(parent)
             GameTooltip:Show()
         end)
         pin:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        pin:SetScript("OnMouseUp", function(self, button)
+            if button == "RightButton" then
+                GameTooltip:Hide()
+                showPinMenu(self)
+            end
+        end)
     end
     pin:SetParent(parent)
     local size = math.max(5, math.min(15, math.floor(tonumber(iRC:GetSettings().guildMapPinSize) or 12)))
@@ -228,6 +298,7 @@ local function initializeMap()
         GuildMap:UpdatePins()
     end)
     WorldMapFrame:HookScript("OnHide", function()
+        hidePinMenu()
         if mapTicker then mapTicker:Cancel(); mapTicker = nil end
         for name in pairs(GuildMap.pins) do clearPin(name) end
     end)

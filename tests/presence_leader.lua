@@ -37,7 +37,7 @@ function LibStub() return { NewAddon = function() return addon end } end
 C_ChatInfo = { SendAddonMessage = function(...) messages[#messages + 1] = { ... } end }
 local private = {}
 assert(loadfile("iRC_Core.lua"))("iRC", private)
-assert(loadfile("iRC_Localization_enUS.lua"))("iRC", private)
+assert(loadfile("Localization/enUS.lua"))("iRC", private)
 assert(loadfile("iRC_Guild.lua"))("iRC", private)
 assert(loadfile("iRC_Connection.lua"))("iRC", private)
 local connectionFrame, iRC = frames[#frames], private.iRC
@@ -48,6 +48,7 @@ iRC.TestAdminName = "Crasjin-Soulseeker"
 iRCDB, iRCCharDB = {}, {}
 local db = iRC:GetConnection()
 db.active = true
+db.rules.raceLock = true
 function iRC:DebugMsg(message) debugMessages[#debugMessages + 1] = message end
 function iRC:GetSelfFoundEvidence() return { status = "UNVERIFIED" } end
 

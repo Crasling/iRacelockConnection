@@ -50,7 +50,7 @@ end
 local addon, private = {}, {}
 function LibStub() return { NewAddon = function() return addon end } end
 assert(loadfile("iRC_Core.lua"))("iRC", private)
-assert(loadfile("iRC_Localization_enUS.lua"))("iRC", private)
+assert(loadfile("Localization/enUS.lua"))("iRC", private)
 assert(loadfile("iRC_Guild.lua"))("iRC", private)
 local guildFrame = frames[#frames]
 assert(loadfile("iRC_Connection.lua"))("iRC", private)
@@ -64,12 +64,14 @@ local function reset(login)
     iRC:ResetPresenceNotificationChecks()
     timers, addonMessages, notices = {}, {}, {}
     db.active, own = true, "Bofficer"
+    db.rules.raceLock = true
     db.members, db.compatibilityMembers, db.newMemberChecks, db.newMemberWelcomeNotices = {}, {}, {}, {}
     db.rosterBaselineReady = false
     roster[2].online, roster[3].online = false, true
     C_ChatInfo.SendAddonMessage = sendAddon
     iRC.ConnectionSessionStartedAt = now - (login and 0 or 1000)
 end
+
 local function respond(name)
     db.members[iRC:NormalizeName(name)] = { name = name, race = "Troll", lastSeen = now, addonVersion = "0.2.4" }
 end
@@ -78,6 +80,15 @@ local function probeCount()
     for _, packet in ipairs(addonMessages) do if packet[1] == "RLAddon" and packet[2]:match("^PING,") then count = count + 1 end end
     return count
 end
+
+reset(true)
+db.rules.raceLock = false
+db.rules.guildMapEnabled = true
+assert(not iRC:IsAddonResponseRequired(db), "an active guild with only utility rules does not require addon presence")
+assert(iRC:GetMemberVerification("Target", true).state == "optional", "missing addon is optional without verification rules")
+iRC:CheckPresenceMismatches(); advance(360)
+assert(#notices == 0 and probeCount() == 0, "optional addon presence causes no probes or warnings")
+db.rules.guildMapEnabled = false
 
 reset(true)
 iRC:CheckPresenceMismatches()

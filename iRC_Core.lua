@@ -182,11 +182,181 @@ function iRC:SendAddonTraffic(prefix, message, distribution, target)
         end)
         return true
     end
+    local sent
     if C_ChatInfo and C_ChatInfo.SendAddonMessage then
-        return C_ChatInfo.SendAddonMessage(prefix, message, distribution, target)
+        sent = C_ChatInfo.SendAddonMessage(prefix, message, distribution, target)
+    elseif SendAddonMessage then
+        sent = SendAddonMessage(prefix, message, distribution, target)
     end
-    if SendAddonMessage then return SendAddonMessage(prefix, message, distribution, target) end
-    return false
+    if sent and self.TrafficMonitorEnabled then self:RecordTrafficBytes("out", #tostring(prefix or "") + #message, prefix, message) end
+    return sent or false
+end
+
+local trafficBuckets = { incoming = {}, outgoing = {} }
+local trafficTypeBuckets = {}
+local trafficFrame
+local monitoredPrefixes = { iRCConnV1 = true, iRCGridV1 = true, iRCIconV1 = true, iRCGFRoster = true, RLAddon = true }
+
+function iRC:RecordTrafficBytes(direction, bytes, prefix, message)
+    if not self.TrafficMonitorEnabled then return end
+    bytes = tonumber(bytes) or 0
+    local buckets = direction == "in" and trafficBuckets.incoming or trafficBuckets.outgoing
+    local second = math.floor(GetTime and GetTime() or 0)
+    local slot = second % 60 + 1
+    local bucket = buckets[slot]
+    if not bucket or bucket.second ~= second then
+        bucket = { second = second, bytes = 0 }
+        buckets[slot] = bucket
+    end
+    bucket.bytes = bucket.bytes + bytes
+    local kind = type(message) == "string" and message:match("^([A-Z][A-Z0-9_]*)") or nil
+    local label = tostring(prefix or "?") .. "/" .. (kind or "other")
+    local typeBuckets = trafficTypeBuckets[label]
+    if not typeBuckets then typeBuckets = {}; trafficTypeBuckets[label] = typeBuckets end
+    local typeBucket = typeBuckets[slot]
+    if not typeBucket or typeBucket.second ~= second then
+        typeBucket = { second = second, incoming = 0, outgoing = 0 }
+        typeBuckets[slot] = typeBucket
+    end
+    if direction == "in" then typeBucket.incoming = typeBucket.incoming + bytes
+    else typeBucket.outgoing = typeBucket.outgoing + bytes end
+end
+
+function iRC:GetTrafficBytesLastMinute()
+    local now = math.floor(GetTime and GetTime() or 0)
+    local function total(buckets)
+        local bytes = 0
+        for _, bucket in pairs(buckets) do
+            if bucket.second > now - 60 and bucket.second <= now then bytes = bytes + bucket.bytes end
+        end
+        return bytes
+    end
+    return total(trafficBuckets.incoming), total(trafficBuckets.outgoing)
+end
+
+function iRC:GetTrafficHotspots()
+    local now, rows = math.floor(GetTime and GetTime() or 0), {}
+    for label, buckets in pairs(trafficTypeBuckets) do
+        local incoming, outgoing = 0, 0
+        for _, bucket in pairs(buckets) do
+            if bucket.second > now - 60 and bucket.second <= now then
+                incoming = incoming + bucket.incoming
+                outgoing = outgoing + bucket.outgoing
+            end
+        end
+        if incoming + outgoing > 0 then
+            rows[#rows + 1] = { label = label, incoming = incoming, outgoing = outgoing, bytes = incoming + outgoing }
+        end
+    end
+    table.sort(rows, function(a, b) return a.bytes > b.bytes end)
+    return rows
+end
+
+function iRC:SetTrafficMonitorEnabled(enabled)
+    enabled = enabled == true and self:IsTestAdmin()
+    self.TrafficMonitorEnabled = enabled
+    if not enabled then
+        if trafficFrame then trafficFrame:UnregisterAllEvents() end
+        wipe(trafficBuckets.incoming)
+        wipe(trafficBuckets.outgoing)
+        wipe(trafficTypeBuckets)
+        return
+    end
+    if not trafficFrame then
+        trafficFrame = CreateFrame("Frame")
+        trafficFrame:SetScript("OnEvent", function(_, event, ...)
+            if event == "CHAT_MSG_ADDON" then
+                local prefix, message, _, sender = ...
+                if monitoredPrefixes[prefix] and iRC:NormalizeName(sender) ~= iRC:NormalizeName(iRC:GetPlayerName()) then
+                    iRC:RecordTrafficBytes("in", #prefix + #(message or ""), prefix, message)
+                end
+            elseif event == "CHAT_MSG_CHANNEL" then
+                local message, sender = ...
+                local channelName = select(9, ...)
+                if type(message) == "string" and channelName == "iRacelockConnection"
+                    and message:sub(1, #"iRCGridV1:") == "iRCGridV1:"
+                    and iRC:NormalizeName(sender) ~= iRC:NormalizeName(iRC:GetPlayerName()) then
+                    iRC:RecordTrafficBytes("in", #message, "iRCGridV1", "CHANNEL")
+                end
+            end
+        end)
+    end
+    trafficFrame:RegisterEvent("CHAT_MSG_ADDON")
+    trafficFrame:RegisterEvent("CHAT_MSG_CHANNEL")
+end
+
+local functionProfileBuckets = {}
+local wrappedFunctions = {}
+local functionProfileTargets = {
+    { "GetConnection" }, { "GetConnectionRules" }, { "IsGuildFoundRequired" },
+    { "GetGuildFoundTradeStatus" }, { "GetGuildRosterSnapshot" }, { "GetGuildRosterRows" },
+    { "GetMemberVerification" }, { "FindConnectionProfile" }, { "CheckPresenceMismatches" },
+    { "GetRaceOverview" }, { "GetGlobalRaceOverview" },
+    { "ConnectionDashboard", "Refresh" }, { "ConnectionDashboard", "RenderVisibleRows" },
+    { "GuildMap", "UpdatePins" }, { "GuildMap", "Cleanup" },
+    { "RaceGrid", "Refresh" }, { "RaceGrid", "BuildOwnGuildReports" },
+    { "RaceLockedSync", "GetStatus" }, { "RaceLockedSync", "DescribeStatus" },
+    { "Professions", "CollectSkills" }, { "Professions", "CollectOpenRecipes" },
+    { "Enforcement", "CheckGroup" }, { "Enforcement", "CheckTradeRestriction" },
+}
+
+function iRC:RecordFunctionTime(label, elapsed)
+    local second = math.floor(GetTime and GetTime() or 0)
+    local buckets = functionProfileBuckets[label]
+    if not buckets then buckets = {}; functionProfileBuckets[label] = buckets end
+    local slot = second % 60 + 1
+    local bucket = buckets[slot]
+    if not bucket or bucket.second ~= second then
+        bucket = { second = second, ms = 0, calls = 0 }
+        buckets[slot] = bucket
+    end
+    bucket.ms = bucket.ms + math.max(0, elapsed)
+    bucket.calls = bucket.calls + 1
+end
+
+function iRC:GetFunctionHotspots()
+    local now, rows = math.floor(GetTime and GetTime() or 0), {}
+    for label, buckets in pairs(functionProfileBuckets) do
+        local ms, calls = 0, 0
+        for _, bucket in pairs(buckets) do
+            if bucket.second > now - 60 and bucket.second <= now then
+                ms, calls = ms + bucket.ms, calls + bucket.calls
+            end
+        end
+        if calls > 0 then rows[#rows + 1] = { label = label, ms = ms, calls = calls } end
+    end
+    table.sort(rows, function(a, b) return a.ms > b.ms end)
+    return rows
+end
+
+function iRC:SetFunctionProfilerEnabled(enabled)
+    enabled = enabled == true and self:IsTestAdmin() and type(debugprofilestop) == "function"
+    if enabled == self.FunctionProfilerEnabled then return end
+    self.FunctionProfilerEnabled = enabled
+    if not enabled then
+        for _, entry in ipairs(wrappedFunctions) do
+            if entry.owner[entry.method] == entry.wrapper then entry.owner[entry.method] = entry.original end
+        end
+        wipe(wrappedFunctions)
+        wipe(functionProfileBuckets)
+        return
+    end
+    wipe(functionProfileBuckets)
+    for _, target in ipairs(functionProfileTargets) do
+        local owner = target[2] and self[target[1]] or self
+        local method = target[2] or target[1]
+        local original = owner and owner[method]
+        if type(original) == "function" then
+            local label = target[2] and (target[1] .. ":" .. method) or ("iRC:" .. method)
+            local function finish(startedAt, ...)
+                self:RecordFunctionTime(label, debugprofilestop() - startedAt)
+                return ...
+            end
+            local wrapper = function(...) return finish(debugprofilestop(), original(...)) end
+            owner[method] = wrapper
+            wrappedFunctions[#wrappedFunctions + 1] = { owner = owner, method = method, original = original, wrapper = wrapper }
+        end
+    end
 end
 
 local DEFAULT_SETTINGS = {
@@ -197,6 +367,8 @@ local DEFAULT_SETTINGS = {
     testGuildMasterOverride = false,
     suppressPresenceWarnings = false,
     suppressRuleSending = false,
+    showTrafficMonitorForTesting = false,
+    showFunctionProfilerForTesting = false,
     showOfficerSettingsForTesting = false,
     hideAttentionReminders = true,
     showGuildMap = true,
@@ -948,6 +1120,15 @@ end
 function iRC:GetConnectionRules()
     local connection = self:GetConnection()
     return connection and connection.rules or self.DefaultConnectionRules
+end
+
+function iRC:IsAddonResponseRequired(connection)
+    connection = connection or self:GetConnection()
+    if not connection or connection.active ~= true then return false end
+    local rules = connection.rules or self.DefaultConnectionRules
+    return rules.raceLock == true or rules.nativeTongueOnly == true
+        or rules.selfFoundOnly == true or rules.guildFoundOnly == true or rules.level60GuildFound == true
+        or rules.sameRaceGroupsOnly == true or rules.guildGroupsOnly == true
 end
 
 function iRC:IsNewMemberWelcomeEnabled()
